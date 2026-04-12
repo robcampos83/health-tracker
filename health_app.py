@@ -417,7 +417,7 @@ def page_dashboard(s, today):
             if burn_chart: st.altair_chart(burn_chart, use_container_width=True)
 
     st.markdown("---")
-with st.expander("🛠️ Advanced: Edit Historical Daily Log"):
+    with st.expander("🛠️ Advanced: Edit Historical Daily Log"):
         if not dl_df.empty:
             # 1. Sort newest to oldest for easier editing on the screen
             display_df = dl_df.copy()
