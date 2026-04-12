@@ -19,10 +19,14 @@ EXPECTED_COLS = {
 def get_data(worksheet):
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
-        # Pull data from the sheet and drop completely blank rows
-        df = conn.read(worksheet=worksheet, ttl=0)
+        # Changed from ttl=0 to ttl="10m" to use caching and prevent Rate Limit crashes!
+        df = conn.read(worksheet=worksheet, ttl="10m")
         df = df.dropna(how='all')
-    except:
+    except Exception as e:
+        # If Google temporarily blocks us, stop safely instead of erasing data!
+        if worksheet == 'settings':
+            st.error("⚠️ Google Sheets is busy syncing! Please wait 60 seconds and refresh the page.")
+            st.stop()
         df = pd.DataFrame()
         
     expected = EXPECTED_COLS[worksheet]
@@ -40,7 +44,6 @@ def get_data(worksheet):
                 df[col] = 0.0
         else:
             if col not in ['date', 'name', 'category', 'recipe_name', 'serving_size', 'ingredients', 'type']:
-                # Clean up commas (e.g., "2,109" -> 2109.0) and force numeric types
                 df[col] = df[col].astype(str).str.replace(',', '', regex=False)
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
                 
@@ -414,11 +417,22 @@ def page_dashboard(s, today):
             if burn_chart: st.altair_chart(burn_chart, use_container_width=True)
 
     st.markdown("---")
-    with st.expander("🛠️ Advanced: Edit Historical Daily Log"):
+with st.expander("🛠️ Advanced: Edit Historical Daily Log"):
         if not dl_df.empty:
-            edited_daily_log = st.data_editor(dl_df, num_rows="dynamic", use_container_width=True, key="dl_edit")
+            # 1. Sort newest to oldest for easier editing on the screen
+            display_df = dl_df.copy()
+            display_df['date_obj'] = pd.to_datetime(display_df['date'], format='%m-%d-%Y', errors='coerce')
+            display_df = display_df.sort_values(by='date_obj', ascending=False).drop(columns=['date_obj']).reset_index(drop=True)
+            
+            edited_daily_log = st.data_editor(display_df, num_rows="dynamic", use_container_width=True, key="dl_edit")
+            
             if st.button("💾 Save Changes", key="save_dl"):
-                write_data('daily_log', edited_daily_log)
+                # 2. Sort it back chronologically before saving it cleanly to Google Sheets
+                save_df = edited_daily_log.copy()
+                save_df['date_obj'] = pd.to_datetime(save_df['date'], format='%m-%d-%Y', errors='coerce')
+                save_df = save_df.sort_values(by='date_obj', ascending=True).drop(columns=['date_obj']).reset_index(drop=True)
+                
+                write_data('daily_log', save_df)
                 st.success("Historical Log updated!")
                 st.rerun()
 
