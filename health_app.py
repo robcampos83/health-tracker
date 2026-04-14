@@ -12,18 +12,17 @@ EXPECTED_COLS = {
     'food_diary': ['id', 'date', 'recipe_name', 'calories', 'sodium', 'carbs', 'fat', 'protein'],
     'recipes': ['id', 'name', 'category', 'calories', 'sodium', 'carbs', 'fat', 'protein', 'ingredients'],
     'ingredients': ['id', 'name', 'serving_size', 'calories', 'protein', 'carbs', 'fat', 'sodium'],
-    'workouts': ['id', 'date', 'type', 'duration_min', 'calories_burned']
+    'workouts': ['id', 'date', 'type', 'duration_min', 'calories_burned'],
+    'body_metrics': ['date', 'weight', 'body_fat', 'lean_mass', 'bmr'] # <-- Added Smart Scale table
 }
 
 # --- GOOGLE SHEETS HELPER FUNCTIONS ---
 def get_data(worksheet):
     conn = st.connection("gsheets", type=GSheetsConnection)
     try:
-        # Changed from ttl=0 to ttl="10m" to use caching and prevent Rate Limit crashes!
         df = conn.read(worksheet=worksheet, ttl="10m")
         df = df.dropna(how='all')
     except Exception as e:
-        # If Google temporarily blocks us, stop safely instead of erasing data!
         if worksheet == 'settings':
             st.error("⚠️ Google Sheets is busy syncing! Please wait 60 seconds and refresh the page.")
             st.stop()
@@ -31,11 +30,9 @@ def get_data(worksheet):
         
     expected = EXPECTED_COLS[worksheet]
     
-    # If the sheet is brand new/empty, initialize with columns
     if df.empty or len(df.columns) == 0:
         df = pd.DataFrame(columns=expected)
         
-    # Enforce strict formatting so charts never break
     for col in expected:
         if col not in df.columns:
             if col in ['date', 'name', 'category', 'recipe_name', 'serving_size', 'ingredients', 'type']:
@@ -51,7 +48,7 @@ def get_data(worksheet):
 
 def write_data(worksheet, df):
     conn = st.connection("gsheets", type=GSheetsConnection)
-    df = df[EXPECTED_COLS[worksheet]]  # Enforce exact column order
+    df = df[EXPECTED_COLS[worksheet]]
     conn.update(worksheet=worksheet, data=df)
     st.cache_data.clear()
 
@@ -370,6 +367,28 @@ def page_dashboard(s, today):
                 st.rerun()
 
     st.markdown("---")
+    st.subheader("📉 Body Composition Trends")
+    bm_df = get_data('body_metrics')
+    
+    if not bm_df.empty and len(bm_df) > 0:
+        chart_df = bm_df.copy()
+        chart_df['date'] = pd.to_datetime(chart_df['date'], format='%m-%d-%Y')
+        
+        base = alt.Chart(chart_df).encode(x=alt.X('date:T', title='Date'))
+        
+        line_weight = base.mark_line(color='#1f77b4', point=True).encode(
+            y=alt.Y('weight:Q', title='Weight (lbs)', scale=alt.Scale(zero=False))
+        )
+        line_bf = base.mark_line(color='#d62728', point=True).encode(
+            y=alt.Y('body_fat:Q', title='Body Fat %', scale=alt.Scale(zero=False))
+        )
+        
+        dual_chart = alt.layer(line_weight, line_bf).resolve_scale(y='independent')
+        st.altair_chart(dual_chart, use_container_width=True)
+    else:
+        st.info("No scale data logged yet! Head to the 'Smart Scale Sync' page to log your first weigh-in.")
+        
+    st.markdown("---")
     st.subheader("📈 Progress & Macro Trends")
     if not dl_df.empty:
         c_a, c_b = st.columns(2)
@@ -419,7 +438,6 @@ def page_dashboard(s, today):
     st.markdown("---")
     with st.expander("🛠️ Advanced: Edit Historical Daily Log"):
         if not dl_df.empty:
-            # 1. Sort newest to oldest for easier editing on the screen
             display_df = dl_df.copy()
             display_df['date_obj'] = pd.to_datetime(display_df['date'], format='%m-%d-%Y', errors='coerce')
             display_df = display_df.sort_values(by='date_obj', ascending=False).drop(columns=['date_obj']).reset_index(drop=True)
@@ -427,7 +445,6 @@ def page_dashboard(s, today):
             edited_daily_log = st.data_editor(display_df, num_rows="dynamic", use_container_width=True, key="dl_edit")
             
             if st.button("💾 Save Changes", key="save_dl"):
-                # 2. Sort it back chronologically before saving it cleanly to Google Sheets
                 save_df = edited_daily_log.copy()
                 save_df['date_obj'] = pd.to_datetime(save_df['date'], format='%m-%d-%Y', errors='coerce')
                 save_df = save_df.sort_values(by='date_obj', ascending=True).drop(columns=['date_obj']).reset_index(drop=True)
@@ -645,8 +662,8 @@ def page_diary(today):
             if st.button(f"💾 Save Changes for {selected_date_str}"):
                 edited_diary = edited_diary.where(pd.notnull(edited_diary), None)
                 fd = get_data('food_diary')
-                fd = fd[fd['date'] != selected_date_str] # Remove old
-                fd = pd.concat([fd, edited_diary], ignore_index=True) # Add new
+                fd = fd[fd['date'] != selected_date_str]
+                fd = pd.concat([fd, edited_diary], ignore_index=True)
                 write_data('food_diary', fd)
                 sync_daily_totals(selected_date_str)
                 st.success("Diary updated!")
@@ -763,11 +780,41 @@ def page_recipes():
                 st.success("Recipes updated!")
                 st.rerun()
 
+def page_body_comp():
+    st.title("⚖️ Smart Scale Sync")
+    
+    with st.form("scale_entry"):
+        st.write("Log today's Wyze Scale data:")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            log_date = st.date_input("Date", datetime.today())
+            weight = st.number_input("Weight (lbs)", min_value=0.0, format="%.1f")
+            body_fat = st.number_input("Body Fat %", min_value=0.0, format="%.1f")
+        with col2:
+            lean_mass = st.number_input("Lean Body Mass (lbs)", min_value=0.0, format="%.1f")
+            bmr = st.number_input("BMR (kcal)", min_value=0, step=1)
+            
+        if st.form_submit_button("💾 Save Metrics"):
+            bm_df = get_data('body_metrics')
+            
+            new_row = pd.DataFrame([{
+                'date': log_date.strftime('%m-%d-%Y'),
+                'weight': weight,
+                'body_fat': body_fat,
+                'lean_mass': lean_mass,
+                'bmr': bmr
+            }])
+            
+            updated_df = pd.concat([bm_df, new_row], ignore_index=True)
+            write_data('body_metrics', updated_df)
+            
+            st.success("Scale data logged successfully! Check the Dashboard for your updated chart.")
+
 # --- MAIN APP ROUTING ---
 def main():
     st.set_page_config(page_title="Health Tracker V4.0", layout="wide")
 
-    # We do a tiny trick to initialize the settings row if the Google Sheet is totally empty
     s_df = get_data("settings")
     if s_df.empty:
         s_df = pd.DataFrame([{'id': 1, 'weight_target': 175.0, 'cal_target': 1650, 'prot_target': 150, 'carb_target': 150, 'fat_target': 55, 'sod_target': 1500, 'water_target': 64}])
@@ -782,6 +829,7 @@ def main():
     if st.sidebar.button("📜 History Lookup", use_container_width=True): st.session_state.page = "History"
     if st.sidebar.button("🍴 Food Diary", use_container_width=True): st.session_state.page = "Diary"
     if st.sidebar.button("📝 Manage Recipes", use_container_width=True): st.session_state.page = "Recipes"
+    if st.sidebar.button("⚖️ Smart Scale Sync", use_container_width=True): st.session_state.page = "Scale"
     
     st.sidebar.markdown("---")
     st.sidebar.header("🎯 Daily Targets")
@@ -810,6 +858,7 @@ def main():
     elif st.session_state.page == "History": page_history()
     elif st.session_state.page == "Diary": page_diary(today)
     elif st.session_state.page == "Recipes": page_recipes()
+    elif st.session_state.page == "Scale": page_body_comp()
 
 if __name__ == "__main__":
     main()
