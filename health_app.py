@@ -811,6 +811,29 @@ def page_body_comp():
             
             st.success("Scale data logged successfully! Check the Dashboard for your updated chart.")
 
+    st.markdown("---")
+    with st.expander("🛠️ Advanced: Edit Past Scale Entries"):
+        bm_df = get_data('body_metrics')
+        if not bm_df.empty:
+            # Sort newest to oldest for easy editing
+            display_df = bm_df.copy()
+            display_df['date_obj'] = pd.to_datetime(display_df['date'], format='%m-%d-%Y', errors='coerce')
+            display_df = display_df.sort_values(by='date_obj', ascending=False).drop(columns=['date_obj']).reset_index(drop=True)
+            
+            edited_bm = st.data_editor(display_df, num_rows="dynamic", use_container_width=True, key="bm_edit")
+            
+            if st.button("💾 Save Scale Changes"):
+                # Sort back chronologically before saving to Google Sheets
+                save_df = edited_bm.copy()
+                save_df['date_obj'] = pd.to_datetime(save_df['date'], format='%m-%d-%Y', errors='coerce')
+                save_df = save_df.sort_values(by='date_obj', ascending=True).drop(columns=['date_obj']).reset_index(drop=True)
+                
+                write_data('body_metrics', save_df)
+                st.success("Scale data updated!")
+                st.rerun()
+        else:
+            st.info("No scale data to edit yet.")
+            
 # --- MAIN APP ROUTING ---
 def main():
     st.set_page_config(page_title="Health Tracker V4.0", layout="wide")
