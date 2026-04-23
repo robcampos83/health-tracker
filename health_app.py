@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
+import time
 from datetime import datetime, timedelta
 from streamlit_gsheets import GSheetsConnection
 
@@ -13,7 +14,7 @@ EXPECTED_COLS = {
     'recipes': ['id', 'name', 'category', 'calories', 'sodium', 'carbs', 'fat', 'protein', 'ingredients'],
     'ingredients': ['id', 'name', 'serving_size', 'calories', 'protein', 'carbs', 'fat', 'sodium'],
     'workouts': ['id', 'date', 'type', 'duration_min', 'calories_burned'],
-    'body_metrics': ['date', 'weight', 'body_fat', 'lean_mass', 'bmr'] # <-- Added Smart Scale table
+    'body_metrics': ['date', 'weight', 'body_fat', 'lean_mass', 'bmr']
 }
 
 # --- GOOGLE SHEETS HELPER FUNCTIONS ---
@@ -50,6 +51,9 @@ def write_data(worksheet, df):
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = df[EXPECTED_COLS[worksheet]]
     conn.update(worksheet=worksheet, data=df)
+    
+    # Give Google Sheets 1.5 seconds to physically save the data before we read again!
+    time.sleep(1.5) 
     st.cache_data.clear()
 
 # --- MATH HELPERS ---
@@ -524,7 +528,7 @@ def page_history():
             fat = float(row['fat_x']) if pd.notna(row['fat_x']) else float(row['fat'])
             sod = float(row['sodium_x']) if pd.notna(row['sodium_x']) else float(row['sodium'])
             
-            with st.expander(f"**{row['recipe_name']}** | {int(cal)} kcal | {int(prot)}g Prot | {int(carb)}g Carb | {int(fat)}g Fat"):
+            with st.expander(f"**{row['recipe_name']}** | {int(cal)} kcal | {int(prot)}g Prot | {int(carb)}g Carb | {int(fat)}g Fat | {int(sod)}mg Sod"):
                 if pd.notna(row['ingredients']) and str(row['ingredients']).strip() != "":
                     st.markdown(f"**Notes:** {row['ingredients']}")
                 
@@ -661,12 +665,23 @@ def page_diary(today):
             edited_diary = st.data_editor(diary_df, num_rows="dynamic", use_container_width=True, key=f"d_edit_{selected_date_str}")
             if st.button(f"💾 Save Changes for {selected_date_str}"):
                 edited_diary = edited_diary.where(pd.notnull(edited_diary), None)
+                
+                # --- Find ALL dates affected by this edit ---
+                affected_dates = edited_diary['date'].unique().tolist()
+                if selected_date_str not in affected_dates:
+                    affected_dates.append(selected_date_str)
+                
                 fd = get_data('food_diary')
-                fd = fd[fd['date'] != selected_date_str]
-                fd = pd.concat([fd, edited_diary], ignore_index=True)
+                fd = fd[fd['date'] != selected_date_str] # Remove old
+                fd = pd.concat([fd, edited_diary], ignore_index=True) # Add new
                 write_data('food_diary', fd)
-                sync_daily_totals(selected_date_str)
-                st.success("Diary updated!")
+                
+                # Run the calculator for every single date that was touched!
+                for d in affected_dates:
+                    if str(d).strip() != "":
+                        sync_daily_totals(d)
+                        
+                st.success("Diary and daily totals updated for all dates!")
                 st.rerun()
         else: st.info(f"No meals for {selected_date_str}.")
 
@@ -815,7 +830,6 @@ def page_body_comp():
     with st.expander("🛠️ Advanced: Edit Past Scale Entries"):
         bm_df = get_data('body_metrics')
         if not bm_df.empty:
-            # Sort newest to oldest for easy editing
             display_df = bm_df.copy()
             display_df['date_obj'] = pd.to_datetime(display_df['date'], format='%m-%d-%Y', errors='coerce')
             display_df = display_df.sort_values(by='date_obj', ascending=False).drop(columns=['date_obj']).reset_index(drop=True)
@@ -823,7 +837,6 @@ def page_body_comp():
             edited_bm = st.data_editor(display_df, num_rows="dynamic", use_container_width=True, key="bm_edit")
             
             if st.button("💾 Save Scale Changes"):
-                # Sort back chronologically before saving to Google Sheets
                 save_df = edited_bm.copy()
                 save_df['date_obj'] = pd.to_datetime(save_df['date'], format='%m-%d-%Y', errors='coerce')
                 save_df = save_df.sort_values(by='date_obj', ascending=True).drop(columns=['date_obj']).reset_index(drop=True)
@@ -833,7 +846,7 @@ def page_body_comp():
                 st.rerun()
         else:
             st.info("No scale data to edit yet.")
-            
+
 # --- MAIN APP ROUTING ---
 def main():
     st.set_page_config(page_title="Health Tracker V4.0", layout="wide")
