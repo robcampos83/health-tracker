@@ -281,7 +281,7 @@ def page_dashboard(s, today):
         df_recent = dl_df.copy()
         df_recent['date'] = pd.to_datetime(df_recent['date'], format='%m-%d-%Y', errors='coerce')
         df_recent = df_recent.dropna(subset=['date']).sort_values('date', ascending=False).head(7)
-        st.info(f"📊 **7-Day Trend Averages:** Weight: **{df_recent[df_recent['weight'] > 0]['weight'].mean():.1f} lbs** | Cal: **{df_recent[df_recent['calories'] > 0]['calories'].mean():.0f}** | Prot: **{df_recent[df_recent['protein'] > 0]['protein'].mean():.0f}g** | Carb: **{df_recent[df_recent['carbs'] > 0]['carbs'].mean():.0f}g** | Fat: **{df_recent[df_recent['fat'] > 0]['fat'].mean():.0f}g**")
+        st.info(f"📊 **7-Day Trend Avst.info(f"📊 **7-Day Trend Averages:** Weight: **{df_recent[df_recent['weight'] > 0]['weight'].mean():.1f} lbs** | Cal: **{df_recent[df_recent['calories'] > 0]['calories'].mean():.0f}** | Prot: **{df_recent[df_recent['protein'] > 0]['protein'].mean():.0f}g** | Carb: **{df_recent[df_recent['carbs'] > 0]['carbs'].mean():.0f}g** | Fat: **{df_recent[df_recent['fat'] > 0]['fat'].mean():.0f}g** | Sod: **{df_recent[df_recent['sodium'] > 0]['sodium'].mean():.0f}mg**")erages:** Weight: **{df_recent[df_recent['weight'] > 0]['weight'].mean():.1f} lbs** | Cal: **{df_recent[df_recent['calories'] > 0]['calories'].mean():.0f}** | Prot: **{df_recent[df_recent['protein'] > 0]['protein'].mean():.0f}g** | Carb: **{df_recent[df_recent['carbs'] > 0]['carbs'].mean():.0f}g** | Fat: **{df_recent[df_recent['fat'] > 0]['fat'].mean():.0f}g**")
 
     df_w_prog = dl_df[dl_df['weight'] > 0].copy() if not dl_df.empty else pd.DataFrame()
     if not df_w_prog.empty and len(df_w_prog) >= 2:
