@@ -79,7 +79,6 @@ def calculate_streak(df_log):
     return streak
 
 # --- DATABASE LOGIC ---
-# Fix: The calculator now accepts data directly from memory (fd_df) so it doesn't wait on Google!
 def sync_daily_totals(log_date, fd_df=None, wk_df=None):
     if fd_df is not None:
         fd = fd_df
@@ -526,7 +525,7 @@ def page_history():
         st.info(f"No nutrition totals logged for {lookup_date_str}.")
         
     st.markdown("---")
-st.subheader(f"🍴 Meals Eaten")
+    st.subheader(f"🍴 Meals Eaten")
     if not fd_df.empty:
         merged_df = pd.merge(fd_df, rec_df, how='left', left_on='recipe_name', right_on='name')
         for index, row in merged_df.iterrows():
@@ -540,7 +539,6 @@ st.subheader(f"🍴 Meals Eaten")
                 if pd.notna(row['ingredients']) and str(row['ingredients']).strip() != "":
                     st.markdown(f"**Notes:** {row['ingredients']}")
                 
-                # Changed from 2 columns to 3 columns to fit the new Delete button
                 b1, b2, b3 = st.columns(3)
                 with b1:
                     if st.button("➕ Add to Today", key=f"relog_{index}_{row['recipe_name']}"):
@@ -560,14 +558,12 @@ st.subheader(f"🍴 Meals Eaten")
                 with b3:
                     if st.button("🗑️ Delete Meal", key=f"delmeal_{index}_{row['recipe_name']}"):
                         full_fd = get_data('food_diary')
-                        # Find this exact meal's unique ID and remove it from the dataframe
                         full_fd = full_fd[full_fd['id'] != row['id_x']]
                         write_data('food_diary', full_fd)
-                        
-                        # Instantly sync the new daily totals minus the deleted meal
                         sync_daily_totals(lookup_date_str, fd_df=full_fd)
                         st.success(f"Deleted '{row['recipe_name']}'!")
                         st.rerun()
+
 def page_diary(today):
     st.title("Food Diary")
     selected_date = st.date_input("📅 Select Date to Log For", value=datetime.today(), format="MM/DD/YYYY")
