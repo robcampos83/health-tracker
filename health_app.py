@@ -52,7 +52,6 @@ def write_data(worksheet, df):
     df = df[EXPECTED_COLS[worksheet]]
     conn.update(worksheet=worksheet, data=df)
     
-    # Give Google Sheets 1.5 seconds to physically save the data before we read again!
     time.sleep(1.5) 
     st.cache_data.clear()
 
@@ -80,8 +79,13 @@ def calculate_streak(df_log):
     return streak
 
 # --- DATABASE LOGIC ---
-def sync_daily_totals(log_date):
-    fd = get_data('food_diary')
+# Fix: The calculator now accepts data directly from memory (fd_df) so it doesn't wait on Google!
+def sync_daily_totals(log_date, fd_df=None, wk_df=None):
+    if fd_df is not None:
+        fd = fd_df
+    else:
+        fd = get_data('food_diary')
+        
     day_fd = fd[fd['date'] == log_date]
     cal = day_fd['calories'].sum() if not day_fd.empty else 0
     sod = day_fd['sodium'].sum() if not day_fd.empty else 0
@@ -89,7 +93,11 @@ def sync_daily_totals(log_date):
     fat = day_fd['fat'].sum() if not day_fd.empty else 0
     prot = day_fd['protein'].sum() if not day_fd.empty else 0
     
-    wk = get_data('workouts')
+    if wk_df is not None:
+        wk = wk_df
+    else:
+        wk = get_data('workouts')
+        
     day_wk = wk[wk['date'] == log_date]
     burn = day_wk['calories_burned'].sum() if not day_wk.empty else 0
 
@@ -115,7 +123,7 @@ def log_to_diary(log_date, name, cal, sod, carb, fat, prot):
     new_row = {'id': new_id, 'date': log_date, 'recipe_name': name, 'calories': cal, 'sodium': sod, 'carbs': carb, 'fat': fat, 'protein': prot}
     fd = pd.concat([fd, pd.DataFrame([new_row])], ignore_index=True)
     write_data('food_diary', fd)
-    sync_daily_totals(log_date)
+    sync_daily_totals(log_date, fd_df=fd)
 
 def update_water(date, amount):
     dl = get_data('daily_log')
@@ -282,6 +290,7 @@ def page_dashboard(s, today):
         df_recent['date'] = pd.to_datetime(df_recent['date'], format='%m-%d-%Y', errors='coerce')
         df_recent = df_recent.dropna(subset=['date']).sort_values('date', ascending=False).head(7)
         st.info(f"📊 **7-Day Trend Averages:** Weight: **{df_recent[df_recent['weight'] > 0]['weight'].mean():.1f} lbs** | Cal: **{df_recent[df_recent['calories'] > 0]['calories'].mean():.0f}** | Prot: **{df_recent[df_recent['protein'] > 0]['protein'].mean():.0f}g** | Carb: **{df_recent[df_recent['carbs'] > 0]['carbs'].mean():.0f}g** | Fat: **{df_recent[df_recent['fat'] > 0]['fat'].mean():.0f}g** | Sod: **{df_recent[df_recent['sodium'] > 0]['sodium'].mean():.0f}mg**")
+
     df_w_prog = dl_df[dl_df['weight'] > 0].copy() if not dl_df.empty else pd.DataFrame()
     if not df_w_prog.empty and len(df_w_prog) >= 2:
         df_w_prog['date'] = pd.to_datetime(df_w_prog['date'], format='%m-%d-%Y', errors='coerce')
@@ -366,7 +375,7 @@ def page_dashboard(s, today):
                 new_row = {'id': new_id, 'date': today, 'type': w_type, 'duration_min': 0.0, 'calories_burned': w_cals}
                 wk = pd.concat([wk, pd.DataFrame([new_row])], ignore_index=True)
                 write_data('workouts', wk)
-                sync_daily_totals(today)
+                sync_daily_totals(today, wk_df=wk)
                 st.rerun()
 
     st.markdown("---")
@@ -465,8 +474,8 @@ def page_dashboard(s, today):
             fd = get_data('food_diary')
             fd.loc[fd['date'] == wrong_date_str, 'date'] = correct_date_str
             write_data('food_diary', fd)
-            sync_daily_totals(wrong_date_str)
-            sync_daily_totals(correct_date_str)
+            sync_daily_totals(wrong_date_str, fd_df=fd)
+            sync_daily_totals(correct_date_str, fd_df=fd)
             st.success(f"Moved meals to {correct_date_str}.")
             st.rerun()
 
@@ -592,7 +601,7 @@ def page_diary(today):
                             new_id += 1
                         fd = pd.concat([fd, pd.DataFrame(new_rows)], ignore_index=True)
                         write_data('food_diary', fd)
-                        sync_daily_totals(selected_date_str)
+                        sync_daily_totals(selected_date_str, fd_df=fd)
                         st.success("Meals logged!")
                         st.rerun()
         else:
@@ -653,7 +662,7 @@ def page_diary(today):
                     new_id += 1
                 fd = pd.concat([fd, pd.DataFrame(new_rows)], ignore_index=True)
                 write_data('food_diary', fd)
-                sync_daily_totals(selected_date_str)
+                sync_daily_totals(selected_date_str, fd_df=fd)
                 st.success("Quick-logged items!")
                 st.rerun()
 
@@ -678,7 +687,7 @@ def page_diary(today):
                 # Run the calculator for every single date that was touched!
                 for d in affected_dates:
                     if str(d).strip() != "":
-                        sync_daily_totals(d)
+                        sync_daily_totals(d, fd_df=fd)
                         
                 st.success("Diary and daily totals updated for all dates!")
                 st.rerun()
