@@ -41,7 +41,10 @@ def get_data(worksheet):
             else:
                 df[col] = 0.0
         else:
-            if col not in ['date', 'name', 'category', 'recipe_name', 'serving_size', 'ingredients', 'type']:
+            if col == 'date':
+                # The Magic Fix: Strips invisible spaces so phantom duplicate days are never created!
+                df[col] = df[col].astype(str).str.strip() 
+            elif col not in ['name', 'category', 'recipe_name', 'serving_size', 'ingredients', 'type']:
                 df[col] = df[col].astype(str).str.replace(',', '', regex=False)
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
                 
@@ -109,7 +112,10 @@ def sync_daily_totals(log_date, fd_df=None, wk_df=None):
         dl.at[idx, 'carbs'] = carb
         dl.at[idx, 'fat'] = fat
         dl.at[idx, 'protein'] = prot
-        dl.at[idx, 'active_cals'] = burn
+        
+        # The Magic Fix: Never overwrite a manually entered active_cals with a 0!
+        existing_burn = float(dl.at[idx, 'active_cals']) if pd.notna(dl.at[idx, 'active_cals']) else 0.0
+        dl.at[idx, 'active_cals'] = max(burn, existing_burn)
     else:
         new_row = {'date': log_date, 'weight': 0.0, 'bp_sys': 0.0, 'bp_dia': 0.0, 'calories': cal, 'sodium': sod, 'protein': prot, 'carbs': carb, 'fat': fat, 'water_oz': 0.0, 'active_cals': burn}
         dl = pd.concat([dl, pd.DataFrame([new_row])], ignore_index=True)
@@ -170,7 +176,9 @@ def recalculate_all_macros():
             dl.at[idx, 'carbs'] = carb
             dl.at[idx, 'fat'] = fat
             dl.at[idx, 'protein'] = prot
-            dl.at[idx, 'active_cals'] = burn
+            
+            existing_burn = float(dl.at[idx, 'active_cals']) if pd.notna(dl.at[idx, 'active_cals']) else 0.0
+            dl.at[idx, 'active_cals'] = max(burn, existing_burn)
         else:
             new_row = {'date': d, 'weight': 0.0, 'bp_sys': 0.0, 'bp_dia': 0.0, 'calories': cal, 'sodium': sod, 'protein': prot, 'carbs': carb, 'fat': fat, 'water_oz': 0.0, 'active_cals': burn}
             dl = pd.concat([dl, pd.DataFrame([new_row])], ignore_index=True)
